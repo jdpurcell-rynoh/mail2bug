@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using log4net;
+using Mail2Bug.Helpers;
 using Microsoft.Exchange.WebServices.Data;
+using Microsoft.Identity.Client;
 
 namespace Mail2Bug.Email.EWS
 {
@@ -20,8 +22,9 @@ namespace Mail2Bug.Email.EWS
         public struct Credentials
         {
             public string EmailAddress;
-            public string UserName;
-            public string Password;
+            public string AppId;
+            public string TenantId;
+            public string ClientSecret;
         }
 
         public struct EWSConnection
@@ -36,7 +39,7 @@ namespace Mail2Bug.Email.EWS
 
             if (_enableConnectionCaching)
             {
-                _cachedConnections = new Dictionary<Tuple<string, string, int, bool>, EWSConnection>();
+                _cachedConnections = new Dictionary<Tuple<string, string, string, int, bool>, EWSConnection>();
             }
         }
 
@@ -72,11 +75,30 @@ namespace Mail2Bug.Email.EWS
             }
         }
 
-        static private Tuple<string, string, int, bool> GetKeyFromCredentials(Credentials credentials, bool useConversationGuid)
+        static private Tuple<string, string, string, int, bool> GetKeyFromCredentials(Credentials credentials, bool useConversationGuid)
         {
-            return new Tuple<string, string, int, bool>(
+            return Tuple.Create(
                 credentials.EmailAddress,
-                credentials.UserName, credentials.Password.GetHashCode(), useConversationGuid);
+                credentials.AppId,
+                credentials.TenantId,
+                credentials.ClientSecret.GetHashCode(),
+                useConversationGuid);
+        }
+
+        static private string GetOAuthAccessToken(Credentials credentials)
+        {
+            IConfidentialClientApplication client = ConfidentialClientApplicationBuilder
+                .Create(credentials.AppId)
+                .WithClientSecret(credentials.ClientSecret)
+                .WithTenantId(credentials.TenantId)
+                .Build();
+
+            // The permission scope required for EWS access
+            string[] ewsScopes = { "https://outlook.office365.com/.default" };
+
+            AuthenticationResult result = AsyncHelper.RunSync(() => client.AcquireTokenForClient(ewsScopes).ExecuteAsync());
+
+            return result.AccessToken;
         }
 
         static private EWSConnection ConnectToEWS(Credentials credentials, bool useConversationGuidOnly)
@@ -84,9 +106,12 @@ namespace Mail2Bug.Email.EWS
             Logger.DebugFormat("Initializing FolderMailboxManager for email adderss {0}", credentials.EmailAddress);
             var exchangeService = new ExchangeService(ExchangeVersion.Exchange2010_SP1)
             {
-                Credentials = new WebCredentials(credentials.UserName, credentials.Password),
-                Timeout = 60000
+                Credentials = new OAuthCredentials(GetOAuthAccessToken(credentials)),
+                Timeout = 60000,
+                ImpersonatedUserId = new ImpersonatedUserId(ConnectingIdType.SmtpAddress, credentials.EmailAddress)
             };
+
+            exchangeService.HttpHeaders.Add("X-AnchorMailbox", credentials.EmailAddress);
 
             exchangeService.AutodiscoverUrl(
                 credentials.EmailAddress,
@@ -109,7 +134,7 @@ namespace Mail2Bug.Email.EWS
         }
 
 
-        private readonly Dictionary<Tuple<string, string, int, bool>, EWSConnection> _cachedConnections;
+        private readonly Dictionary<Tuple<string, string, string, int, bool>, EWSConnection> _cachedConnections;
         private readonly bool _enableConnectionCaching;
 
         private static readonly ILog Logger = LogManager.GetLogger(typeof(EWSConnectionManger));

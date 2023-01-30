@@ -1,7 +1,6 @@
 ﻿using System.Collections.Generic;
 using Mail2Bug.Email.EWS;
 using Mail2Bug.ExceptionClasses;
-using Mail2Bug.Helpers;
 using Microsoft.Exchange.WebServices.Data;
 
 namespace Mail2Bug.Email
@@ -20,12 +19,13 @@ namespace Mail2Bug.Email
         public IMailboxManager CreateMailboxManager(Config.EmailSettings emailSettings)
         {
             var credentialsHelper = new Helpers.CredentialsHelper();
-            string password = credentialsHelper.GetPassword(emailSettings.EWSPasswordFile, emailSettings.EncryptionScope, emailSettings.EWSKeyVaultSecret);
+            string clientSecret = credentialsHelper.GetPassword(emailSettings.EWSClientSecretFile, emailSettings.EncryptionScope, emailSettings.EWSKeyVaultSecret);
             var credentials = new EWSConnectionManger.Credentials
             {
                 EmailAddress = emailSettings.EWSMailboxAddress,
-                UserName = emailSettings.EWSUsername,
-                Password = password
+                AppId = emailSettings.EWSAppId,
+                TenantId = emailSettings.EWSTenantId,
+                ClientSecret = clientSecret
             };
 
             var exchangeService = _connectionManger.GetConnection(credentials, emailSettings.UseConversationGuidOnly);
